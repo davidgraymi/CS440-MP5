@@ -10,24 +10,34 @@ class QAgent:
     def __init__(self, state_space : gym.Space, action_space : gym.Space, init_val=0.0):
         self._state_space = state_space
         self._action_space = action_space
-        # TODO(III): initialize table for Q-values as self.q_table
-        self.q_table = None
+        # (III): initialize table for Q-values as self.q_table
+        self.q_table = np.full((state_space.n, action_space.n), init_val, dtype=float)
 
     def save_weights(self, filename="QAgent_weights.npy"):
         np.save(filename, self.q_table)
 
-    # TODO(III): implement epsilon-greedy action selection
+    # (III): implement epsilon-greedy action selection
     # return the action index (integer) chosen by the agent for the given state
     def act(self, state, epsilon=0.0):
-        return None
+        if np.random.random() < epsilon:
+            return self._action_space.sample()
+
+        # With probability (1-epsilon): exploit (best known action)
+        else:
+            return int(np.argmax(self.q_table[state]))
     
-    # TODO(III): implement the Q-learning update rule to update self.q_table
+    # (III): implement the Q-learning update rule to update self.q_table
     # terminal is a boolean indicating whether next_state is a terminal state, if so then the target should be just the reward
     # alpha is the learning rate and gamma is the discount factor
     def update(self, state, action, reward, next_state, terminal, alpha, gamma):
-        pass
+        future_q_value = (not terminal) * np.max(self.q_table[next_state])
+        target = reward + gamma * future_q_value
+        temporal_difference = target - self.q_table[state][action]
+        self.q_table[state][action] = (
+            self.q_table[state][action] + alpha * temporal_difference
+        )
 
-# TODO(III): implement the training loop for QAgent using a Gymnasium environment
+# (III): implement the training loop for QAgent using a Gymnasium environment
 # epochs: number of episodes to train for, an episode ends when the environment step returns either terminated or truncated as True
 # alpha: learning rate for Q-learning update
 # gamma: discount factor for Q-learning update
@@ -36,13 +46,51 @@ class QAgent:
 def train_agent(env : gym.Env, agent : QAgent,
                 epochs=10000, alpha=0.1, 
                 gamma=0.9, epsilon=0.1):
-    return []
+    episode_rewards = []
+    
+    for _ in range(epochs):
+        state, _ = env.reset()
+        accum_reward = 0
+        done = False
+        
+        while not done:
+            action = agent.act(state, epsilon)
+            next_state, reward, terminated, truncated, _ = env.step(action)
+
+            agent.update(
+                state,
+                action,
+                reward,
+                next_state,
+                terminated,
+                alpha,
+                gamma
+            )
+            
+            state = next_state
+            accum_reward = accum_reward + reward
+            done = terminated or truncated
+
+        episode_rewards.append(accum_reward)
+
+    return episode_rewards
 
 # you may want to consider implementing a separate "evaluation" function
 # which checks the performance of the trained agent, e.g., using epsilon=0.0
 # The greedy policy extracted from your self.q_table is evaluated by the autograder
 def eval_agent(env : gym.Env, agent : QAgent):
-    pass
+    state, _ = env.reset()
+    accum_reward = 0
+    done = False
+    
+    while not done:
+        action = agent.act(state, 0.0)
+        next_state, reward, terminated, truncated, _ = env.step(action)
+        state = next_state
+        accum_reward = accum_reward + reward
+        done = terminated or truncated
+
+    print(f'Evaluation reward: {accum_reward}')
 
 def q_learning(
         epochs=10000, alpha=0.1, gamma=0.9, epsilon=0.1,
@@ -81,13 +129,13 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     experiments = {
-        "pessimistic_init": {
-            "epochs": 10, # is this enough?
-            "alpha": 0.001, # is this too big? too small?
+        "init": {
+            "epochs": 10000, # is this enough?
+            "alpha": 0.1, # is this too big? too small?
             # in lecture we assumed gamma was part of the problem description, here you can tune it...
-            "gamma": 0.999, # is this too big? too small?
-            "epsilon": 0.1, # what is a good exploration rate for this problem? 
-            "init_val": -100000000.0, # very pessimistic initialization...
+            "gamma": 0.7, # is this too big? too small?
+            "epsilon": 0.5, # what is a good exploration rate for this problem? 
+            "init_val": 0.0, # very pessimistic initialization...
             "save_weights": True 
         }
     }
@@ -102,7 +150,7 @@ if __name__ == "__main__":
         # create moving average plot
         if len(episode_rewards) >= moving_average_window:
             moving_average_episode_rewards[exp] = np.convolve(np.array(episode_rewards), np.ones(moving_average_window) / moving_average_window, mode='valid')
-        
+
     for exp, mov_avg_ep_rewards in moving_average_episode_rewards.items():
         plt.plot(mov_avg_ep_rewards, label=exp)
 
