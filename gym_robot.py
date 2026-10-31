@@ -183,12 +183,24 @@ class GymDubinsCar(gym.Env):
     # --- Helpers for computing observation features from lidar, configuration, and goal state ---
 
     def make_observation(self):
-        # TODO(IV): Improve this simple baseline feature vector
+        # (IV): Improve this simple baseline feature vector
         # Always return a finite, real-valued 1D NumPy array with the same shape and dtype
         # self.config and self.goal_config are [x, y, theta]; theta is in radians, with 0 along the positive x-axis and increasing counterclockwise
         # self.lidar_distances has 16 beams: index 0 points forward (from the current orientation) and later indices rotate counterclockwise
         # self.workspace_diagonal is useful for scaling distances; remember to wrap relative angles across 0 and 2*pi
-        return np.concatenate([self.config, self.goal_config]).astype(np.float64)
+
+        raw = np.concatenate([
+            np.ones(1),
+            self.config,
+            self.goal_config,
+            self.lidar_distances,
+            np.array([
+                dist_2d(self.config, self.goal_config),
+                cross_2d(self.config, self.goal_config)
+            ]),
+        ]).astype(np.float64)
+        design = np.outer(raw, raw).flatten()
+        return design
 
     # --- The important methods for our gym environment: reset and step ---
 

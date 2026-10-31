@@ -1,5 +1,7 @@
 import argparse, json, random, time
 from pathlib import Path
+from collections import namedtuple
+from collections import deque
 
 import gymnasium as gym
 import matplotlib.pyplot as plt
@@ -7,15 +9,17 @@ import numpy as np
 
 from gym_robot import GYM_DUBINS_CAR_ENV_ID, dist_2d
 
+Transition = namedtuple('Transition', ['features', 'action', 'reward', 'next_features', 'terminated'])
+
 class LinearDQNAgent:
     def __init__(self, num_features, num_actions, target_weights_update_freq=100, max_buffer_size=50000):
         self.target_weights_update_freq = target_weights_update_freq
         self.num_updates = 0
-        self.replay_buffer = []
+        self.replay_buffer = deque(maxlen=max_buffer_size)
         self.max_buffer_size = max_buffer_size
-        # TODO(IV): initialize the linear Q-function weights
-        self.weights = None
-        self.target_weights = None
+        # (IV): initialize the linear Q-function weights
+        self.weights = np.zeros((num_features, num_actions))
+        self.target_weights = self.weights.copy()
         
     def save_weights(self, filename):
         np.save(filename, self.weights)
@@ -31,29 +35,101 @@ class LinearDQNAgent:
         self.target_weights = self.weights.copy()
 
     def act(self, features, epsilon=0.1):
-        # TODO(IV): implement epsilon-greedy action selection
-        return 0
+        # (IV): implement epsilon-greedy action selection
+        if np.random.random() < epsilon:
+            return random.randint(0, self.weights.shape[1] - 1)
+        else:
+            forward = features @ self.weights
+            return int(np.argmax(forward))
 
     def update(self, features, action, reward, next_features, terminated, alpha=0.005, gamma=0.9, batch_size=64):
-        # TODO(IV): implement the replay-buffer DQN update
+        # (IV): implement the replay-buffer DQN update
         # A standard pattern is:
         # 1. push the new transition into self.replay_buffer
         # 2. once the buffer has at least batch_size transitions, sample a batch
         # 3. compute current Q-values and target Q-values
         # 4. apply a linear gradient step to only the chosen action column
         # 5. periodically copy self.weights into self.target_weights
-        pass
+        
+        self.replay_buffer.append(Transition(features, action, reward, next_features, terminated))
+        if len(self.replay_buffer) < batch_size:
+            return
 
+        transition_batch = random.sample(self.replay_buffer, batch_size)
+        features_batch, action_batch, reward_batch, next_features_batch, terminated_batch = zip(*transition_batch)
+        features_batch = np.array(features_batch)
+        action_batch = np.array(action_batch)
+        reward_batch = np.array(reward_batch)
+        next_features_batch = np.array(next_features_batch)
+        terminated_batch = np.array(terminated_batch)
+
+        # print(f'features{features_batch.shape} @ weights{self.weights.shape} = ', end='')
+        q = features_batch @ self.weights
+        # print(f'q{q.shape}')
+
+        # print(f'features\'{next_features_batch.shape} @ weights\'{self.target_weights.shape} = ', end='')
+        q_target = next_features_batch @ self.target_weights
+        # print(f'q\'{q_target.shape}')
+
+        # print(f'~terminated{terminated_batch.shape} * max(q_target{q_target.shape}){np.max(q_target, axis=1).shape} = ', end='')
+        future_q_value = (~terminated_batch).astype(float) * np.max(q_target, axis=1)
+        # print(f'q\'\'{future_q_value.shape}')
+
+        # print(f'r{reward_batch.shape} + gamma * q\'\'{future_q_value.shape} = ', end='')
+        y = reward_batch + gamma * future_q_value
+        # print(f'y{y.shape}')
+
+        row_indices = np.arange(batch_size)
+        q_chosen = q[row_indices, action_batch]
+        errors = np.zeros_like(q)
+
+        # print(f'q_a{q_chosen.shape} - y{y.shape} = ', end='')
+        errors[row_indices, action_batch] = q_chosen - y
+        # print(f'errors{errors.shape}')
+
+        # print(f'(features.T{features_batch.T.shape} @ errors{errors.shape}) / {batch_size} = ', end='')
+        grad_loss = (features_batch.T @ errors) / batch_size
+        # print(f'grad{grad_loss.shape}')
+
+        self.weights -= alpha * grad_loss
+
+        self.num_updates += 1
+        if self.num_updates % self.target_weights_update_freq == 0:
+            self.target_weights = self.weights.copy()
 
 def run_episode(
         agent: LinearDQNAgent, env: gym.Env, epsilon,
         learning_rate, discount_factor, batch_size):
-    # TODO(IV): run one complete training episode in one environment
+    # (IV): run one complete training episode in one environment
     # - reset the environment
     # - select and execute actions until the episode terminates or truncates
     # - pass each transition and the update hyperparameters to agent.update(...)
     # - return the episode's total undiscounted reward
-    return 0.0
+
+    state, _ = env.reset()
+    total_reward = 0.0
+    done = False
+
+    while not done:
+        action = agent.act(state, epsilon=epsilon)
+        next_state, reward, terminated, truncated, _ = env.step(action)
+
+        agent.update(
+            state,
+            action,
+            reward,
+            next_state,
+            terminated,
+            learning_rate,
+            discount_factor,
+            batch_size
+        )
+        
+        state = next_state
+        total_reward += reward
+        done = terminated or truncated
+
+    return total_reward
 
 
 def train(
@@ -63,7 +139,35 @@ def train(
     # TODO(IV): build your training experiment around run_episode(...)
     # There are many reasonable ways to implement this but 
     # as a baseline you should cycle through every environment and linearly decay epsilon
-    return []
+
+    episode_rewards = [[] for _ in envs]
+    epsilon = epsilon_start
+    print(f'epsilon start: {epsilon}')
+
+    for episode in range(0, num_episodes):
+        for i, env in enumerate(envs):
+            reward = run_episode(
+                agent,
+                env,
+                epsilon,
+                learning_rate,
+                discount_factor,
+                batch_size
+            )
+
+            episode_rewards[i].append(reward)
+
+        # If this episode is on the epsilon decay cadence, then decay epsilon
+        if episode < epsilon_decay_steps:
+            fraction_remaining = max(0.0, 1.0 - ((episode + 1) / epsilon_decay_steps))
+            epsilon = epsilon_end + fraction_remaining * (epsilon_start - epsilon_end)
+
+    print(f'epsilon end: {epsilon}')
+
+    r = np.array(episode_rewards)
+    r_avg = np.average(r, axis=0)
+    plt.plot(r_avg)
+    plt.savefig(output_path)
 
 
 def test(agent: LinearDQNAgent, env: gym.Env, output_path: Path | None = None):
@@ -147,15 +251,15 @@ if __name__ == "__main__":
     # These defaults are reasonable starting values, not a guaranteed best configuration
     parser = argparse.ArgumentParser(description="CS440 MP5 Reinforcement Learning")
     parser.add_argument(
-        "--num_episodes", type=int, default=5000,
+        "--num_episodes", type=int, default=500,
         help="Number of outer training episodes; each visits every training environment",
     )
     parser.add_argument("--epsilon_start", type=float, default=1.0, help="Initial epsilon value for epsilon-greedy exploration")
     parser.add_argument("--epsilon_end", type=float, default=0.1, help="Final epsilon value for epsilon-greedy exploration")
-    parser.add_argument("--epsilon_decay_steps", type=int, default=1000, help="Number of episodes over which to linearly decay epsilon")
-    parser.add_argument("--target_weights_update_freq", type=int, default=100, help="Number of updates between target network weight updates")
+    parser.add_argument("--epsilon_decay_steps", type=int, default=400, help="Number of episodes over which to linearly decay epsilon")
+    parser.add_argument("--target_weights_update_freq", type=int, default=10, help="Number of updates between target network weight updates")
     parser.add_argument("--max_buffer_size", type=int, default=50000, help="Maximum size of the replay buffer")
-    parser.add_argument("--learning_rate", type=float, default=0.005, help="Learning rate for the DQN")
+    parser.add_argument("--learning_rate", type=float, default=0.05, help="Learning rate for the DQN")
     parser.add_argument("--discount_factor", type=float, default=0.9, help="Discount factor for the DQN")
     parser.add_argument("--batch_size", type=int, default=64, help="Batch size for the DQN")
     parser.add_argument("--seed", type=int, default=440, help="Random seed for reproducible training (default: 440)")
