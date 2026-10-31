@@ -142,7 +142,6 @@ def train(
 
     episode_rewards = [[] for _ in envs]
     epsilon = epsilon_start
-    print(f'epsilon start: {epsilon}')
 
     for episode in range(0, num_episodes):
         for i, env in enumerate(envs):
@@ -161,8 +160,6 @@ def train(
         if episode < epsilon_decay_steps:
             fraction_remaining = max(0.0, 1.0 - ((episode + 1) / epsilon_decay_steps))
             epsilon = epsilon_end + fraction_remaining * (epsilon_start - epsilon_end)
-
-    print(f'epsilon end: {epsilon}')
 
     r = np.array(episode_rewards)
     r_avg = np.average(r, axis=0)
@@ -251,15 +248,15 @@ if __name__ == "__main__":
     # These defaults are reasonable starting values, not a guaranteed best configuration
     parser = argparse.ArgumentParser(description="CS440 MP5 Reinforcement Learning")
     parser.add_argument(
-        "--num_episodes", type=int, default=500,
+        "--num_episodes", type=int, default=3000,
         help="Number of outer training episodes; each visits every training environment",
     )
     parser.add_argument("--epsilon_start", type=float, default=1.0, help="Initial epsilon value for epsilon-greedy exploration")
     parser.add_argument("--epsilon_end", type=float, default=0.1, help="Final epsilon value for epsilon-greedy exploration")
-    parser.add_argument("--epsilon_decay_steps", type=int, default=400, help="Number of episodes over which to linearly decay epsilon")
-    parser.add_argument("--target_weights_update_freq", type=int, default=10, help="Number of updates between target network weight updates")
+    parser.add_argument("--epsilon_decay_steps", type=int, default=2000, help="Number of episodes over which to linearly decay epsilon")
+    parser.add_argument("--target_weights_update_freq", type=int, default=500, help="Number of updates between target network weight updates")
     parser.add_argument("--max_buffer_size", type=int, default=50000, help="Maximum size of the replay buffer")
-    parser.add_argument("--learning_rate", type=float, default=0.05, help="Learning rate for the DQN")
+    parser.add_argument("--learning_rate", type=float, default=0.001, help="Learning rate for the DQN")
     parser.add_argument("--discount_factor", type=float, default=0.9, help="Discount factor for the DQN")
     parser.add_argument("--batch_size", type=int, default=64, help="Batch size for the DQN")
     parser.add_argument("--seed", type=int, default=440, help="Random seed for reproducible training (default: 440)")

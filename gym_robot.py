@@ -189,15 +189,16 @@ class GymDubinsCar(gym.Env):
         # self.lidar_distances has 16 beams: index 0 points forward (from the current orientation) and later indices rotate counterclockwise
         # self.workspace_diagonal is useful for scaling distances; remember to wrap relative angles across 0 and 2*pi
 
+        angle_to_goal = np.arctan2(self.goal_config[1] - self.config[1], self.goal_config[0] - self.config[0])
+        rel_angle = (angle_to_goal - self.config[2] + np.pi) % (2 * np.pi) - np.pi
+
         raw = np.concatenate([
             np.ones(1),
-            self.config,
-            self.goal_config,
-            self.lidar_distances,
-            np.array([
-                dist_2d(self.config, self.goal_config),
-                cross_2d(self.config, self.goal_config)
-            ]),
+            self.config[:2] / self.workspace_diagonal,
+            self.goal_config[:2] / self.workspace_diagonal,
+            [self.config[2] / np.pi, angle_to_goal, rel_angle, np.sin(rel_angle), np.cos(rel_angle)],
+            1.0 - (self.lidar_distances / self.workspace_diagonal),
+            [dist_2d(self.config, self.goal_config) / self.workspace_diagonal],
         ]).astype(np.float64)
         design = np.outer(raw, raw).flatten()
         return design
